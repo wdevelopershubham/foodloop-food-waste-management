@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from './api';
+import MapView from './MapView';
+import Scanner from './Scanner';
 
 const FLOW = ['CREATED', 'NGO_ACCEPTED', 'VOLUNTEER_ASSIGNED', 'PICKED_UP', 'DELIVERED'];
-const label = (s) => s.replaceAll('_', ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase());
+const EMOJI = { 'Cooked meals': '🍛', Bakery: '🥖', 'Fruits & vegetables': '🍎', 'Packaged food': '📦', Sweets: '🍩', Beverages: '🥤' };
+const label = (s) => s.replaceAll('_', ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase()).replace('Ngo', 'NGO');
 const fmt = (t) => (t ? new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '-');
 const localIso = (offsetH = 0) => {
   const d = new Date(Date.now() + offsetH * 3600e3 - new Date().getTimezoneOffset() * 60e3);
@@ -33,9 +36,15 @@ function Auth({ onAuth }) {
   };
 
   return (
-    <div className="wrap" style={{ maxWidth: 560 }}>
-      <h1 className="logo" style={{ fontSize: '2.4rem' }}>FoodLoop</h1>
-      <p className="muted">Surplus food from kitchens to the people who need it, before it expires.</p>
+    <>
+    <div className="marquee" aria-hidden="true"><div>{Array(8).fill('rescue food  •  feed people  •  zero waste  •  ').join('')}</div></div>
+    <div className="wrap auth">
+      <div className="hero">
+        <span className="sticker">🌱 food rescue, live</span>
+        <h1>Don't bin it. Loop it.</h1>
+        <p>Kitchens post their leftovers. NGOs claim them. Volunteers ride them over. All before the expiry clock hits zero.</p>
+        <div className="chips"><span>🍛 Cooked meals</span><span>🥖 Bakery</span><span>🍎 Fresh produce</span><span>⏱ Expiry alerts</span><span>📱 QR handover</span></div>
+      </div>
       <form className="card form" onSubmit={submit}>
         <h2 className="full">{mode === 'login' ? 'Sign in' : 'Create an account'}</h2>
         {mode === 'register' && <>
@@ -65,6 +74,7 @@ function Auth({ onAuth }) {
         </button>
       </form>
     </div>
+    </>
   );
 }
 
@@ -73,12 +83,13 @@ function Impact({ token }) {
   const [s, setS] = useState(null);
   useEffect(() => { api('/analytics', { token }).then(setS).catch(() => {}); }, [token]);
   if (!s) return null;
-  const items = [['kgRescued', 'kg of food rescued'], ['mealsServed', 'meals served'], ['completedDonations', 'deliveries completed'],
-                 ['activeNgos', 'NGOs'], ['volunteers', 'volunteers']];
+  const items = [['kgRescued', 'kg of food rescued', '🥗'], ['mealsServed', 'meals served', '🍽️'], ['completedDonations', 'deliveries done', '🚴'],
+                 ['activeNgos', 'NGOs on board', '🤝'], ['volunteers', 'volunteers', '⚡']];
   return (
     <div className="grid" style={{ marginBottom: '1rem' }}>
-      {items.map(([k, t]) => <div className="card stat" key={k}><b>{s[k]}</b><span>{t}</span></div>)}
-      {s.topDonors.length > 0 && <div className="card"><h3>Top donors</h3>
+      {items.map(([k, t, e], i) => <div className={`card stat c${i}`} key={k}><em>{e}</em><b>{s[k]}</b><span>{t}</span></div>)}
+      <div className="card wide"><h3>Donations by status</h3>{Object.entries(s.byStatus).map(([k, v]) => <div key={k} className="bar"><span>{label(k)}</span><i style={{ width: `${(v / s.totalDonations) * 100}%` }} /><b>{v}</b></div>)}{s.totalDonations === 0 && <p className="muted">No donations yet.</p>}</div>
+      {s.topDonors.length > 0 && <div className="card wide"><h3>Top donors</h3>
         {s.topDonors.map((d) => <div key={d.donor} className="row between"><span>{d.donor}</span><b>{d.kg} kg</b></div>)}</div>}
     </div>
   );
@@ -88,6 +99,7 @@ function Impact({ token }) {
 function DonationCard({ d, user, token, reload }) {
   const [msg, setMsg] = useState(null);
   const [qr, setQr] = useState(null);
+  const [scan, setScan] = useState(false);
   const [matches, setMatches] = useState(null);
   const [code, setCode] = useState('');
   const role = user.role;
@@ -103,9 +115,9 @@ function DonationCard({ d, user, token, reload }) {
   const idx = FLOW.indexOf(d.status);
 
   return (
-    <div className="card">
+    <div className={`card dcard st-${d.status}`}>
       <div className="row between">
-        <h3>{d.foodCategory} · {d.quantityKg} kg {d.vegetarian ? '(veg)' : '(non-veg)'}</h3>
+        <h3>{EMOJI[d.foodCategory] || '🍽️'} {d.foodCategory} · {d.quantityKg} kg {d.vegetarian ? '(veg)' : '(non-veg)'}</h3>
         <div className="row">
           {d.urgent && <span className="badge urgent">Urgent</span>}
           <span className={`badge s-${d.status}`}>{label(d.status)}</span>
@@ -134,10 +146,12 @@ function DonationCard({ d, user, token, reload }) {
           <input placeholder={d.status === 'VOLUNTEER_ASSIGNED' ? 'Scan or paste donor pickup code' : 'Scan or paste NGO delivery code'}
                  value={code} onChange={(e) => setCode(e.target.value)} style={{ minWidth: 260 }} />
           <button onClick={() => act(d.status === 'VOLUNTEER_ASSIGNED' ? 'pickup' : 'deliver', { token: code })}>
-            {d.status === 'VOLUNTEER_ASSIGNED' ? 'Confirm pickup' : 'Confirm delivery'}</button></>}
+            {d.status === 'VOLUNTEER_ASSIGNED' ? 'Confirm pickup' : 'Confirm delivery'}</button>
+          <button className="ghost" onClick={() => setScan(true)}>Scan QR with camera</button></>}
       </div>
 
       {msg && <p className="err">{msg}</p>}
+      {scan && <Scanner onClose={() => setScan(false)} onScan={(t) => { setScan(false); setCode(t); act(d.status === 'VOLUNTEER_ASSIGNED' ? 'pickup' : 'deliver', { token: t }); }} />}
       {qr && <div className="qr"><img src={qr.qr} alt={`${qr.type} QR code`} width="150" height="150" />
         <div><b>{qr.type === 'PICKUP' ? 'Show this to the volunteer at pickup' : 'Show this to the volunteer at delivery'}</b>
           <p className="muted">Or read out the code:</p><code>{qr.token}</code></div></div>}
@@ -166,7 +180,7 @@ function NewDonation({ token, user, onDone }) {
   return (
     <div className="grid">
       <form className="card form" onSubmit={submit} style={{ gridColumn: 'span 2' }}>
-        <h2 className="full">Add surplus food</h2>
+        <h2 className="full">Got leftovers? 🍛 Post them</h2>
         <label>Food category<select value={f.foodCategory} onChange={set('foodCategory')}>
           {['Cooked meals', 'Bakery', 'Fruits & vegetables', 'Packaged food', 'Sweets', 'Beverages'].map((c) => <option key={c}>{c}</option>)}</select></label>
         <label>Quantity (kg)<input type="number" min="0.5" step="0.5" required value={f.quantityKg} onChange={set('quantityKg')} /></label>
@@ -179,7 +193,7 @@ function NewDonation({ token, user, onDone }) {
         <button className="full">Post donation</button>
       </form>
       <div className="card">
-        <h3>Surplus predictor</h3>
+        <h3>🔮 Surplus predictor</h3>
         <p className="muted">Enter how much you plan to cook today and the model estimates the leftover.</p>
         <label>Planned quantity (kg)<input type="number" value={prepared} onChange={(e) => setPrepared(e.target.value)} /></label>
         <p><button className="ghost" onClick={predict}>Predict surplus</button></p>
@@ -193,16 +207,20 @@ function NewDonation({ token, user, onDone }) {
 function Dashboard({ session, onLogout }) {
   const { token, user } = session;
   const [items, setItems] = useState([]); const [tab, setTab] = useState('list'); const [err, setErr] = useState('');
+  const [view, setView] = useState('list'); const [filter, setFilter] = useState('ALL');
   const reload = useCallback(() => api('/donations', { token }).then(setItems).catch((e) => setErr(e.message)), [token]);
   useEffect(() => { reload(); const t = setInterval(reload, 30000); return () => clearInterval(t); }, [reload]);
 
   const heading = { DONOR: 'Your donations', NGO: 'Donations you can accept', VOLUNTEER: 'Pickups and deliveries', ADMIN: 'All donations' }[user.role];
-  const empty = { DONOR: 'Nothing posted yet. Add surplus food and an NGO can claim it.', NGO: 'No open donations right now.',
+  const empty = { DONOR: 'Nothing posted yet. Add surplus food and an NGO can claim it 🍛', NGO: 'No open donations right now.',
                   VOLUNTEER: 'No pickups waiting. Check back soon.', ADMIN: 'No donations yet.' }[user.role];
+
+  const closed = ['DELIVERED', 'EXPIRED', 'CANCELLED'];
+  const shown = items.filter((d) => filter === 'ALL' || (filter === 'ACTIVE' ? !closed.includes(d.status) : closed.includes(d.status)));
 
   return (
     <>
-      <div className="top"><span className="logo">FoodLoop</span>
+      <div className="top"><span className="logo">♻ FoodLoop</span>
         <div className="row"><span className="muted">{user.orgName || user.name} · {user.role.toLowerCase()}</span><button className="ghost" onClick={onLogout}>Sign out</button></div></div>
       <div className="wrap">
         <Impact token={token} />
@@ -214,8 +232,15 @@ function Dashboard({ session, onLogout }) {
           : <>
               <h2>{heading}</h2>
               {err && <p className="err">{err}</p>}
-              {items.length === 0 && <div className="card empty">{empty}</div>}
-              {items.map((d) => <DonationCard key={d.id} d={d} user={user} token={token} reload={reload} />)}
+              <div className="row between" style={{ marginBottom: '1rem' }}>
+                <div className="row">{[['ALL', 'All'], ['ACTIVE', 'Active'], ['DONE', 'Finished']].map(([k, t]) =>
+                  <button key={k} className={filter === k ? '' : 'ghost'} onClick={() => setFilter(k)}>{t}</button>)}</div>
+                <div className="row">{[['list', 'List'], ['map', 'Map']].map(([k, t]) =>
+                  <button key={k} className={view === k ? '' : 'ghost'} onClick={() => setView(k)}>{t}</button>)}</div>
+              </div>
+              {view === 'map' ? <MapView items={shown} /> : <>
+                {shown.length === 0 && <div className="card empty">{items.length === 0 ? empty : 'Nothing matches this filter.'}</div>}
+                {shown.map((d) => <DonationCard key={d.id} d={d} user={user} token={token} reload={reload} />)}</>}
             </>}
       </div>
     </>
